@@ -428,9 +428,6 @@ def explain_anomalies(
     max_examples: int = 10,
 ) -> Dict[str, Any]:
     """Return plain-language, rule-based context for the highest-scoring alerts.
-
-    These reasons describe observed signals, rather than claiming to identify the
-    cause of an anomaly or proving that a login is malicious.
     """
     if len(df) != len(scores) or len(df) != len(predictions):
         raise ValueError("df, scores, and predictions must have the same length.")
