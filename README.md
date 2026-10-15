@@ -18,17 +18,17 @@ flowchart LR
     CLI["CLI: auth_anomaly_pipeline.py"] --> RUN["run_pipeline(path)"]
     WEB["Streamlit: app.py"] --> ANALYZE["analyze_file(path)"]
     RUN --> ANALYZE
-    D["Ruta a CSV, TXT, Parquet o JSON local"] --> ANALYZE
+    INPUT["Ruta a CSV, TXT, Parquet o JSON local"] --> ANALYZE
     ANALYZE --> LOAD["io.load_data"]
-    LOAD --> SCHEMA["infer_schema"]
-    SCHEMA --> CLEAN["clean_data"]
-    CLEAN --> FEATURES["engineer_features"]
-    FEATURES --> MATRIX["build_feature_matrix<br/>encoding + RobustScaler"]
-    MATRIX --> MODEL["IsolationForest"]
-    MODEL --> REPORT["evaluate + explain_anomalies"]
-    LABEL["Etiqueta de referencia opcional"] -. "solo para evaluación" .-> REPORT
-    REPORT --> CLI_OUT["CLI: reporte en logs<br/>y resumen en terminal"]
-    REPORT --> WEB_OUT["Streamlit: métricas,<br/>alertas y CSV descargable"]
+    LOAD --> SCHEMA["schema.infer_schema"]
+    SCHEMA --> CLEAN["schema.clean_data"]
+    CLEAN --> FEAT["features.engineer_features"]
+    FEAT --> MATRIX["features.build_feature_matrix"]
+    MATRIX --> MODEL["detection.IsolationForest"]
+    MODEL --> REPORT["detection.evaluate + explain"]
+    LABEL["Etiqueta referencia (opcional)"] -. "solo evaluación" .-> REPORT
+    REPORT --> CLI_OUT["CLI: log + terminal"]
+    REPORT --> WEB_OUT["Streamlit: métricas, alertas, CSV"]
 ```
 
 El pipeline identifica columnas y roles semánticos, limpia valores, construye variables y genera scores y alertas. Si existe una etiqueta de referencia, calcula métricas supervisadas; esa etiqueta se excluye de la matriz de entrenamiento. El módulo `auth_anomaly_pipeline.py` conserva el comando histórico y delega en el paquete `auth_anomaly/`.
