@@ -9,15 +9,17 @@ Los sistemas de autenticación generan registros con contexto como usuario, hora
 
 El objetivo de esta solución es procesar esos registros, calcular señales de comportamiento y asignar un score de anomalía para apoyar la revisión de un analista. La hipótesis de trabajo es que un modelo no supervisado puede ayudar a priorizar combinaciones poco frecuentes incluso cuando no se dispone de una etiqueta confiable para cada evento. Esta hipótesis requiere evaluación con datos separados antes de considerarse validada.
 
-## Arquitectura actual
+## Arquitectura
 
-El código actual implementa un flujo local de extremo a extremo. El usuario proporciona un archivo; la CLI coordina la carga, el procesamiento, el modelo y el reporte.
+La solución ofrece dos interfaces locales, CLI y Streamlit, que usan el mismo pipeline. Ambas reciben una ruta local; ninguna implementa por su cuenta las transformaciones o el detector.
 
 ```mermaid
 flowchart LR
-    D["CSV, TXT, Parquet o JSON local"] --> CLI["CLI: auth_anomaly_pipeline.py"]
-    CLI --> RUN["run_pipeline(path)"]
-    RUN --> LOAD["load_data"]
+    CLI["CLI: auth_anomaly_pipeline.py"] --> RUN["run_pipeline(path)"]
+    WEB["Streamlit: app.py"] --> ANALYZE["analyze_file(path)"]
+    RUN --> ANALYZE
+    D["Ruta a CSV, TXT, Parquet o JSON local"] --> ANALYZE
+    ANALYZE --> LOAD["io.load_data"]
     LOAD --> SCHEMA["infer_schema"]
     SCHEMA --> CLEAN["clean_data"]
     CLEAN --> FEATURES["engineer_features"]
@@ -25,10 +27,21 @@ flowchart LR
     MATRIX --> MODEL["IsolationForest"]
     MODEL --> REPORT["evaluate + explain_anomalies"]
     LABEL["Etiqueta de referencia opcional"] -. "solo para evaluación" .-> REPORT
-    REPORT --> OUTPUT["Reporte JSON en logs<br/>y resumen en terminal"]
+    REPORT --> CLI_OUT["CLI: reporte en logs<br/>y resumen en terminal"]
+    REPORT --> WEB_OUT["Streamlit: métricas,<br/>alertas y CSV descargable"]
 ```
 
-El pipeline identifica columnas y roles semánticos, limpia valores, construye variables y genera scores y alertas. Si existe una etiqueta de referencia, calcula métricas supervisadas; esa etiqueta se excluye de la matriz de entrenamiento.
+El pipeline identifica columnas y roles semánticos, limpia valores, construye variables y genera scores y alertas. Si existe una etiqueta de referencia, calcula métricas supervisadas; esa etiqueta se excluye de la matriz de entrenamiento. El módulo `auth_anomaly_pipeline.py` conserva el comando histórico y delega en el paquete `auth_anomaly/`.
+
+| Módulo | Responsabilidad |
+|---|---|
+| `auth_anomaly/io.py` | Lectura de archivos locales y aplicación de límites de filas cuando el formato lo permite. |
+| `auth_anomaly/schema.py` | Normalización de columnas, inferencia de roles y limpieza. |
+| `auth_anomaly/features.py` | Variables de autenticación, codificación y escalado. |
+| `auth_anomaly/detection.py` | Isolation Forest, métricas y explicaciones basadas en reglas. |
+| `auth_anomaly/pipeline.py` | Orquestación por ruta y contrato `PipelineResult` para la interfaz. |
+| `auth_anomaly/cli.py` | Argumentos y salida de terminal. |
+| `app.py` | Interfaz Streamlit; configura el análisis y presenta resultados. |
 
 
 ## Componente de inteligencia artificial
@@ -71,15 +84,15 @@ kaggle datasets download -d chethuhn/network-intrusion-dataset \
 
 CIC-IDS2017 puede servir para un experimento separado de detección de intrusiones en red. No contiene el mismo tipo de evento que RBA: sus filas representan flujos, no intentos de autenticación. Aunque el cargador acepta CSV y el pipeline puede procesar variables numéricas, las variables de historial de usuario, login, geolocalización de acceso e IP nueva están diseñadas para autenticaciones.
 
-## Instalación y ejecución actual
+## Instalación y ejecución
 
-Se requiere Python 3.10 o posterior.Para instalar las utilizadas por la CLI:
+Se requiere Python 3.10 o posterior. Instala las dependencias de ejecución en un entorno virtual:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install numpy pandas scikit-learn
+python -m pip install -r requirements.txt
 ```
 
 En Windows, activar el entorno con `.venv\Scripts\activate` en lugar de `source .venv/bin/activate`.
@@ -95,9 +108,25 @@ python auth_anomaly_pipeline.py data/rba/rba-dataset.csv \
 
 `--schema-map` permite corregir explícitamente el rol de una columna. La etiqueta se utiliza para calcular métricas y no como variable de entrenamiento. `--sample-rows` toma las primeras N filas del archivo; el resultado depende de ese subconjunto y no necesariamente representa el dataset completo.
 
+### Interfaz Streamlit
+
+Con el mismo entorno virtual activo, inicia la interfaz:
+
+```bash
+streamlit run app.py
+```
+
+La aplicación permite indicar una ruta del sistema de archivos donde se ejecuta Streamlit. La ruta inicial es `data/rba/rba-dataset.csv`; se puede cambiar desde el panel lateral. Configura el límite de filas, `contamination` y, si hace falta, mapeos explícitos en JSON, por ejemplo `{"attack_label":"Is Account Takeover"}`. Presiona **Analizar archivo** para ejecutar el mismo pipeline que usa la CLI.
+
+La interfaz no sube archivos desde el navegador: procesa archivos locales del host donde corre Streamlit. Para RBA, conserva un límite de filas para controlar memoria y tiempo. El resultado incluye métricas disponibles, eventos marcados ordenados por score y una descarga CSV con las filas limpias, `anomaly_score` e `is_anomaly`. El score no es una probabilidad.
+
+Para instalar también las herramientas de prueba, usa `python -m pip install -r requirements-dev.txt` y ejecuta `python -m pytest`.
+
 
 ## Lectura de resultados
 
 El reporte incluye cantidad de filas de entrada y limpias, mapeo de columnas, variables generadas, detalles de la matriz, evaluación disponible, ejemplos de anomalías y advertencias.
 
-Si hay etiqueta de referencia, se informan precisión, recall, F1 y tasa de falsos positivos. En el estado actual, el modelo se ajusta y se evalúa sobre las mismas filas (`run_pipeline()`); esas métricas son **in-sample** y no prueban rendimiento sobre datos no vistos. Sin etiqueta, el reporte incluye tasa de anomalías y cuantiles del score, que son estadísticas descriptivas y no métricas de exactitud.
+Si hay etiqueta de referencia, se informan precisión, recall, F1 y tasa de falsos positivos. En el estado actual, el modelo se ajusta y se evalúa sobre las mismas filas (`analyze_file()`); esas métricas son **in-sample** y no prueban rendimiento sobre datos no vistos. Sin etiqueta, el reporte incluye tasa de anomalías y cuantiles del score, que son estadísticas descriptivas y no métricas de exactitud.
+
+Los timestamps numéricos reconocidos como rol temporal se interpretan como épocas Unix según su magnitud (segundos, milisegundos, microsegundos o nanosegundos). Si el formato de un dataset no sigue esas unidades, debe normalizarse o revisarse antes de interpretar las variables temporales.

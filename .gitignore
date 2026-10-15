@@ -1,3 +1,37 @@
+# Virtual environment
 /.venv
+
+# Python cache and compiled files
 /__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.python-version
+*.so
+
+# Distribution / packaging
+/dist/
+/build/
+*.egg-info/
+
+# IDE and editor
+/.idea/
+/.vscode/
+*.swp
+*.swo
+
+# Data and outputs
 /data/
+*.log
+*.csv
+*.json
+*.parquet
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Test and coverage
+.pytest_cache/
+.coverage
+htmlcov/
